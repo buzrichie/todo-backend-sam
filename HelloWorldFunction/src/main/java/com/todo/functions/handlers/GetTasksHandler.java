@@ -6,6 +6,7 @@ import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyRequestEvent;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyResponseEvent;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.todo.model.Task;
+import com.todo.utils.CorsUtils;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 import software.amazon.awssdk.services.dynamodb.model.QueryRequest;
@@ -15,10 +16,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Lambda handler for retrieving tasks of a user.
- * Triggered by GET /tasks
- */
 public class GetTasksHandler implements RequestHandler<APIGatewayProxyRequestEvent, APIGatewayProxyResponseEvent> {
 
     private final DynamoDbClient dynamoDbClient = DynamoDbClient.create();
@@ -27,13 +24,17 @@ public class GetTasksHandler implements RequestHandler<APIGatewayProxyRequestEve
 
     @Override
     public APIGatewayProxyResponseEvent handleRequest(APIGatewayProxyRequestEvent request, Context context) {
-        try {
-            // ✅ Extract Cognito userId (sub claim)
-            String userId = request.getRequestContext().getAuthorizer().get("claims") != null
-                    ? (String) ((Map<String, Object>) request.getRequestContext().getAuthorizer().get("claims")).get("sub")
-                    : "anonymous";
+        // Handle CORS preflight request
+        if (CorsUtils.isPreflightRequest(request.getHttpMethod())) {
+            return createCorsResponse();
+        }
 
-            // ✅ Query tasks for this user
+        Map<String, String> headers = CorsUtils.createCorsHeaders();
+
+        try {
+            String userId = extractUserIdFromRequest(request);
+
+            // Query DynamoDB for tasks belonging to this user
             Map<String, String> expressionAttributesNames = new HashMap<>();
             expressionAttributesNames.put("#uid", "UserId");
 
@@ -49,7 +50,7 @@ public class GetTasksHandler implements RequestHandler<APIGatewayProxyRequestEve
 
             List<Map<String, AttributeValue>> items = dynamoDbClient.query(queryRequest).items();
 
-            // ✅ Convert DynamoDB items → Task objects
+            // Convert DynamoDB items to Task objects
             List<Task> tasks = new ArrayList<>();
             for (Map<String, AttributeValue> item : items) {
                 Task task = new Task();
@@ -60,22 +61,44 @@ public class GetTasksHandler implements RequestHandler<APIGatewayProxyRequestEve
                 if (item.containsKey("Deadline")) {
                     task.setDeadline(Long.parseLong(item.get("Deadline").n()));
                 }
-                if (item.containsKey("ExpireAt")) {
-                    task.setExpireAt(Long.parseLong(item.get("ExpireAt").n()));
+                if (item.containsKey("expireAt")) {
+                    task.setExpireAt(Long.parseLong(item.get("expireAt").n()));
                 }
                 tasks.add(task);
             }
 
-            // ✅ Return clean JSON array of tasks
+            // Return tasks as JSON
             return new APIGatewayProxyResponseEvent()
                     .withStatusCode(200)
+                    .withHeaders(headers)
                     .withBody(objectMapper.writeValueAsString(tasks));
 
         } catch (Exception e) {
             context.getLogger().log("Error in GetTasksHandler: " + e.getMessage());
             return new APIGatewayProxyResponseEvent()
                     .withStatusCode(500)
+                    .withHeaders(headers)
                     .withBody("{\"error\":\"Could not fetch tasks\"}");
         }
+    }
+
+    private String extractUserIdFromRequest(APIGatewayProxyRequestEvent request) {
+        try {
+            if (request.getRequestContext().getAuthorizer() != null &&
+                    request.getRequestContext().getAuthorizer().get("claims") != null) {
+                Map<String, Object> claims = (Map<String, Object>) request.getRequestContext().getAuthorizer().get("claims");
+                return (String) claims.get("sub");
+            }
+            return "anonymous";
+        } catch (Exception e) {
+            return "anonymous";
+        }
+    }
+
+    private APIGatewayProxyResponseEvent createCorsResponse() {
+        return new APIGatewayProxyResponseEvent()
+                .withStatusCode(200)
+                .withHeaders(CorsUtils.createCorsHeaders())
+                .withBody("");
     }
 }
