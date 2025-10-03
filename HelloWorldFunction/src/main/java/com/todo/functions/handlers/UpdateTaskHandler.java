@@ -5,6 +5,7 @@ import com.amazonaws.services.lambda.runtime.RequestHandler;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyRequestEvent;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyResponseEvent;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.todo.utils.CorsUtils;   // ✅ include CORS helper
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 import software.amazon.awssdk.services.dynamodb.model.UpdateItemRequest;
@@ -25,17 +26,22 @@ public class UpdateTaskHandler implements RequestHandler<APIGatewayProxyRequestE
     @Override
     public APIGatewayProxyResponseEvent handleRequest(APIGatewayProxyRequestEvent request, Context context) {
         try {
-            String taskId = request.getPathParameters().get("taskId");
-
-            // Get userId from Cognito claims safely
-            Map<String, Object> authorizer = request.getRequestContext().getAuthorizer();
-            String userId = "anonymous";
-            if (authorizer != null && authorizer.get("claims") instanceof Map) {
-                Map<String, Object> claims = (Map<String, Object>) authorizer.get("claims");
-                userId = claims.getOrDefault("sub", "anonymous").toString();
+            // ✅ Handle CORS preflight
+            if (CorsUtils.isPreflightRequest(request.getHttpMethod())) {
+                return new APIGatewayProxyResponseEvent()
+                        .withStatusCode(200)
+                        .withHeaders(CorsUtils.createCorsHeaders())
+                        .withBody("");
             }
 
-            // Parse body
+            String taskId = request.getPathParameters().get("taskId");
+
+            // ✅ Get userId from Cognito claims safely
+            String userId = request.getRequestContext().getAuthorizer().get("claims") != null
+                    ? (String) ((Map<String, Object>) request.getRequestContext().getAuthorizer().get("claims")).get("sub")
+                    : "anonymous";
+
+            // ✅ Parse request body
             Map<String, Object> body = objectMapper.readValue(request.getBody(), Map.class);
 
             Map<String, String> expressionNames = new HashMap<>();
@@ -54,10 +60,11 @@ public class UpdateTaskHandler implements RequestHandler<APIGatewayProxyRequestE
                 updateExpr.append("#st = :st, ");
             }
 
-            // If no fields were provided, return 400
+            // ✅ Return 400 if no fields to update
             if (expressionValues.isEmpty()) {
                 return new APIGatewayProxyResponseEvent()
                         .withStatusCode(400)
+                        .withHeaders(CorsUtils.createCorsHeaders())
                         .withBody("{\"error\":\"No valid fields provided for update\"}");
             }
 
@@ -76,17 +83,20 @@ public class UpdateTaskHandler implements RequestHandler<APIGatewayProxyRequestE
                     .updateExpression(finalUpdateExpr)
                     .expressionAttributeNames(expressionNames)
                     .expressionAttributeValues(expressionValues)
-                    .returnValues("UPDATED_NEW") // helpful for debugging
+                    .returnValues("UPDATED_NEW") // optional, for debugging
                     .build());
 
+            // ✅ Success response with CORS
             return new APIGatewayProxyResponseEvent()
                     .withStatusCode(200)
+                    .withHeaders(CorsUtils.createCorsHeaders())
                     .withBody("{\"message\":\"Task updated successfully\"}");
 
         } catch (Exception e) {
-            context.getLogger().log("Error in UpdateTaskHandler: " + e);
+            context.getLogger().log("Error in UpdateTaskHandler: " + e.getMessage());
             return new APIGatewayProxyResponseEvent()
                     .withStatusCode(500)
+                    .withHeaders(CorsUtils.createCorsHeaders())
                     .withBody("{\"error\":\"Could not update task\"}");
         }
     }
