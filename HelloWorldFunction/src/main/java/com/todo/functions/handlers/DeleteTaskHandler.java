@@ -4,6 +4,7 @@ import com.amazonaws.services.lambda.runtime.Context;
 import com.amazonaws.services.lambda.runtime.RequestHandler;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyRequestEvent;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyResponseEvent;
+import com.todo.utils.CorsUtils; // ✅ Import CORS utils
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 import software.amazon.awssdk.services.dynamodb.model.DeleteItemRequest;
@@ -23,6 +24,14 @@ public class DeleteTaskHandler implements RequestHandler<APIGatewayProxyRequestE
     @Override
     public APIGatewayProxyResponseEvent handleRequest(APIGatewayProxyRequestEvent request, Context context) {
         try {
+            // ✅ Handle preflight OPTIONS request
+            if (CorsUtils.isPreflightRequest(request.getHttpMethod())) {
+                return new APIGatewayProxyResponseEvent()
+                        .withStatusCode(200)
+                        .withHeaders(CorsUtils.createCorsHeaders())
+                        .withBody("");
+            }
+
             String taskId = request.getPathParameters().get("taskId");
 
             // Get userId from Cognito claims
@@ -41,14 +50,19 @@ public class DeleteTaskHandler implements RequestHandler<APIGatewayProxyRequestE
                     .key(key)
                     .build());
 
+            // ✅ Return success with CORS headers
             return new APIGatewayProxyResponseEvent()
                     .withStatusCode(200)
+                    .withHeaders(CorsUtils.createCorsHeaders())
                     .withBody("{\"message\":\"Task deleted successfully\"}");
 
         } catch (Exception e) {
             context.getLogger().log("Error in DeleteTaskHandler: " + e.getMessage());
+
+            // ✅ Always return CORS headers
             return new APIGatewayProxyResponseEvent()
                     .withStatusCode(500)
+                    .withHeaders(CorsUtils.createCorsHeaders())
                     .withBody("{\"error\":\"Could not delete task\"}");
         }
     }

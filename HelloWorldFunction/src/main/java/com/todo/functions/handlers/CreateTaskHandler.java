@@ -7,6 +7,7 @@ import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyResponseEvent
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.todo.model.Task;
+import com.todo.utils.CorsUtils;   // ✅ using your CorsUtils
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 import software.amazon.awssdk.services.dynamodb.model.PutItemRequest;
@@ -14,10 +15,6 @@ import software.amazon.awssdk.services.dynamodb.model.PutItemRequest;
 import java.util.HashMap;
 import java.util.Map;
 
-/**
- * Lambda handler for creating a new Task.
- * Triggered by POST /tasks
- */
 public class CreateTaskHandler implements RequestHandler<APIGatewayProxyRequestEvent, APIGatewayProxyResponseEvent> {
 
     private final DynamoDbClient dynamoDbClient = DynamoDbClient.create();
@@ -27,16 +24,24 @@ public class CreateTaskHandler implements RequestHandler<APIGatewayProxyRequestE
     @Override
     public APIGatewayProxyResponseEvent handleRequest(APIGatewayProxyRequestEvent request, Context context) {
         try {
-            // Deserialize request body into Task (only description is expected from client)
+            // ✅ Handle preflight OPTIONS request
+            if (CorsUtils.isPreflightRequest(request.getHttpMethod())) {
+                return new APIGatewayProxyResponseEvent()
+                        .withStatusCode(200)
+                        .withHeaders(CorsUtils.createCorsHeaders())
+                        .withBody("");
+            }
+
+            // Deserialize request body
             Map<String, Object> body = objectMapper.readValue(request.getBody(), Map.class);
             String description = (String) body.get("description");
 
-            // Get UserId from Cognito authorizer claims
+            // Get UserId from Cognito claims
             String userId = request.getRequestContext().getAuthorizer().get("claims") != null
                     ? (String) ((Map<String, Object>) request.getRequestContext().getAuthorizer().get("claims")).get("sub")
-                    : "anonymous"; // fallback (useful for local testing)
+                    : "anonymous";
 
-            // Create Task object
+            // Create task
             Task task = new Task(userId, description);
 
             // Build DynamoDB item
@@ -48,21 +53,22 @@ public class CreateTaskHandler implements RequestHandler<APIGatewayProxyRequestE
             item.put("Deadline", AttributeValue.builder().n(task.getDeadline().toString()).build());
             item.put("ExpireAt", AttributeValue.builder().n(task.getExpireAt().toString()).build());
 
-            // Save to DynamoDB
             dynamoDbClient.putItem(PutItemRequest.builder()
                     .tableName(tableName)
                     .item(item)
                     .build());
 
-            // Return success response
+            // ✅ Success response with CORS headers
             return new APIGatewayProxyResponseEvent()
                     .withStatusCode(201)
+                    .withHeaders(CorsUtils.createCorsHeaders())
                     .withBody(objectMapper.writeValueAsString(task));
 
         } catch (Exception e) {
             context.getLogger().log("Error in CreateTaskHandler: " + e.getMessage());
             return new APIGatewayProxyResponseEvent()
                     .withStatusCode(500)
+                    .withHeaders(CorsUtils.createCorsHeaders())
                     .withBody("{\"error\":\"Could not create task\"}");
         }
     }

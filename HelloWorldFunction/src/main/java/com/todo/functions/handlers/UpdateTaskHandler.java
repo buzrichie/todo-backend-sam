@@ -27,12 +27,15 @@ public class UpdateTaskHandler implements RequestHandler<APIGatewayProxyRequestE
         try {
             String taskId = request.getPathParameters().get("taskId");
 
-            // Get userId from Cognito claims
-            String userId = request.getRequestContext().getAuthorizer().get("claims") != null
-                    ? (String) ((Map<String, Object>) request.getRequestContext().getAuthorizer().get("claims")).get("sub")
-                    : "anonymous";
+            // Get userId from Cognito claims safely
+            Map<String, Object> authorizer = request.getRequestContext().getAuthorizer();
+            String userId = "anonymous";
+            if (authorizer != null && authorizer.get("claims") instanceof Map) {
+                Map<String, Object> claims = (Map<String, Object>) authorizer.get("claims");
+                userId = claims.getOrDefault("sub", "anonymous").toString();
+            }
 
-            // Parse body (may include description and/or status)
+            // Parse body
             Map<String, Object> body = objectMapper.readValue(request.getBody(), Map.class);
 
             Map<String, String> expressionNames = new HashMap<>();
@@ -41,17 +44,24 @@ public class UpdateTaskHandler implements RequestHandler<APIGatewayProxyRequestE
 
             if (body.containsKey("description")) {
                 expressionNames.put("#desc", "Description");
-                expressionValues.put(":desc", AttributeValue.builder().s((String) body.get("description")).build());
+                expressionValues.put(":desc", AttributeValue.builder().s(body.get("description").toString()).build());
                 updateExpr.append("#desc = :desc, ");
             }
 
             if (body.containsKey("status")) {
                 expressionNames.put("#st", "Status");
-                expressionValues.put(":st", AttributeValue.builder().s((String) body.get("status")).build());
+                expressionValues.put(":st", AttributeValue.builder().s(body.get("status").toString()).build());
                 updateExpr.append("#st = :st, ");
             }
 
-            // Remove trailing comma if needed
+            // If no fields were provided, return 400
+            if (expressionValues.isEmpty()) {
+                return new APIGatewayProxyResponseEvent()
+                        .withStatusCode(400)
+                        .withBody("{\"error\":\"No valid fields provided for update\"}");
+            }
+
+            // Remove trailing comma
             String finalUpdateExpr = updateExpr.toString().replaceAll(", $", "");
 
             // Build key
@@ -66,6 +76,7 @@ public class UpdateTaskHandler implements RequestHandler<APIGatewayProxyRequestE
                     .updateExpression(finalUpdateExpr)
                     .expressionAttributeNames(expressionNames)
                     .expressionAttributeValues(expressionValues)
+                    .returnValues("UPDATED_NEW") // helpful for debugging
                     .build());
 
             return new APIGatewayProxyResponseEvent()
@@ -73,7 +84,7 @@ public class UpdateTaskHandler implements RequestHandler<APIGatewayProxyRequestE
                     .withBody("{\"message\":\"Task updated successfully\"}");
 
         } catch (Exception e) {
-            context.getLogger().log("Error in UpdateTaskHandler: " + e.getMessage());
+            context.getLogger().log("Error in UpdateTaskHandler: " + e);
             return new APIGatewayProxyResponseEvent()
                     .withStatusCode(500)
                     .withBody("{\"error\":\"Could not update task\"}");

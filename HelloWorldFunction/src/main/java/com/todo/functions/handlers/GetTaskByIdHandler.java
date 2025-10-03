@@ -6,6 +6,7 @@ import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyRequestEvent;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyResponseEvent;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.todo.model.Task;
+import com.todo.utils.CorsUtils; // ✅ Import CORS helper
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 import software.amazon.awssdk.services.dynamodb.model.GetItemRequest;
@@ -26,6 +27,14 @@ public class GetTaskByIdHandler implements RequestHandler<APIGatewayProxyRequest
     @Override
     public APIGatewayProxyResponseEvent handleRequest(APIGatewayProxyRequestEvent request, Context context) {
         try {
+            // ✅ Handle preflight OPTIONS
+            if (CorsUtils.isPreflightRequest(request.getHttpMethod())) {
+                return new APIGatewayProxyResponseEvent()
+                        .withStatusCode(200)
+                        .withHeaders(CorsUtils.createCorsHeaders())
+                        .withBody("");
+            }
+
             // ✅ Extract userId from JWT claims
             String userId = request.getRequestContext().getAuthorizer().get("claims") != null
                     ? (String) ((Map<String, Object>) request.getRequestContext().getAuthorizer().get("claims")).get("sub")
@@ -50,6 +59,7 @@ public class GetTaskByIdHandler implements RequestHandler<APIGatewayProxyRequest
             if (item == null || item.isEmpty()) {
                 return new APIGatewayProxyResponseEvent()
                         .withStatusCode(404)
+                        .withHeaders(CorsUtils.createCorsHeaders()) // ✅ Add headers
                         .withBody("{\"error\":\"Task not found\"}");
             }
 
@@ -66,15 +76,17 @@ public class GetTaskByIdHandler implements RequestHandler<APIGatewayProxyRequest
                 task.setExpireAt(Long.parseLong(item.get("ExpireAt").n()));
             }
 
-            // ✅ Return JSON
+            // ✅ Return JSON with CORS headers
             return new APIGatewayProxyResponseEvent()
                     .withStatusCode(200)
+                    .withHeaders(CorsUtils.createCorsHeaders())
                     .withBody(objectMapper.writeValueAsString(task));
 
         } catch (Exception e) {
             context.getLogger().log("Error in GetTaskByIdHandler: " + e.getMessage());
             return new APIGatewayProxyResponseEvent()
                     .withStatusCode(500)
+                    .withHeaders(CorsUtils.createCorsHeaders()) // ✅ Ensure headers on error
                     .withBody("{\"error\":\"Could not fetch task\"}");
         }
     }

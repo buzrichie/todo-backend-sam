@@ -36,12 +36,6 @@ public class PostAuthHandler implements RequestHandler<CognitoUserPoolPostAuthen
         } catch (Exception e) {
             context.getLogger().log("Failed to publish SNS message: " + e.getMessage());
         }
-
-        // Optional: inject custom claims into JWT
-        // event.getResponse().getClaimsOverrideDetails()
-        //      .getClaimsToAddOrOverride()
-        //      .put("role", "USER");
-
         return event;
     }
 }
