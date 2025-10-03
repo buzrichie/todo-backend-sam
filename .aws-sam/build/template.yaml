@@ -1,0 +1,344 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Serverless To-Do App with Java Lambdas
+Globals:
+  Function:
+    Timeout: 30
+    Runtime: java17
+    MemorySize: 1024
+    Architectures:
+    - x86_64
+Parameters:
+  StageName:
+    Type: String
+    Default: dev
+  NotificationEmail:
+    Type: String
+    Default: your-email@example.com
+Resources:
+  TasksTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName:
+        Fn::Sub: ${AWS::StackName}-TasksTable
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+      - AttributeName: UserId
+        AttributeType: S
+      - AttributeName: TaskId
+        AttributeType: S
+      KeySchema:
+      - AttributeName: UserId
+        KeyType: HASH
+      - AttributeName: TaskId
+        KeyType: RANGE
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      TimeToLiveSpecification:
+        AttributeName: ExpireAt
+        Enabled: true
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName:
+        Fn::Sub: ${AWS::StackName}-UserPool
+      AutoVerifiedAttributes:
+      - email
+      UsernameAttributes:
+      - email
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireUppercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+      LambdaConfig:
+        PostAuthentication:
+          Fn::GetAtt:
+          - PostAuthLambda
+          - Arn
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: TodoAppClient
+      UserPoolId:
+        Ref: UserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+      - ALLOW_USER_PASSWORD_AUTH
+      - ALLOW_REFRESH_TOKEN_AUTH
+      - ALLOW_USER_SRP_AUTH
+  TaskNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName:
+        Fn::Sub: ${AWS::StackName}-TaskNotifications
+  TaskNotificationSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn:
+        Ref: TaskNotificationTopic
+      Protocol: email
+      Endpoint:
+        Ref: NotificationEmail
+  TaskExpiryQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName:
+        Fn::Sub: ${AWS::StackName}-TaskExpiryQueue.fifo
+      FifoQueue: true
+      ContentBasedDeduplication: true
+      VisibilityTimeout: 300
+  ApiGateway:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName:
+        Ref: StageName
+      Cors:
+        AllowMethods: '''GET,POST,PUT,DELETE,OPTIONS'''
+        AllowHeaders: '''Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'''
+        AllowOrigin: '''*'''
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn:
+              Fn::GetAtt:
+              - UserPool
+              - Arn
+  CreateTaskFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-CreateTask
+      Handler: com.todo.functions.handlers.CreateTaskHandler::handleRequest
+      CodeUri: CreateTaskFunction
+      Environment:
+        Variables:
+          TABLE_NAME:
+            Ref: TasksTable
+          QUEUE_URL:
+            Ref: TaskExpiryQueue
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: TasksTable
+      - SQSSendMessagePolicy:
+          QueueName:
+            Fn::GetAtt:
+            - TaskExpiryQueue
+            - QueueName
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /tasks
+            Method: post
+            RestApiId:
+              Ref: ApiGateway
+    Metadata:
+      SamResourceId: CreateTaskFunction
+  GetTasksFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-GetTasks
+      Handler: com.todo.functions.tasks.GetTasksHandler::handleRequest
+      Runtime: java17
+      CodeUri: GetTasksFunction
+      Environment:
+        Variables:
+          TABLE_NAME:
+            Ref: TasksTable
+      Policies:
+      - Statement:
+          Effect: Allow
+          Action:
+          - dynamodb:GetItem
+          - dynamodb:Query
+          - dynamodb:Scan
+          Resource:
+            Fn::GetAtt:
+            - TasksTable
+            - Arn
+    Metadata:
+      SamResourceId: GetTasksFunction
+  UpdateTaskFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-UpdateTask
+      Handler: com.todo.functions.handlers.UpdateTaskHandler::handleRequest
+      CodeUri: UpdateTaskFunction
+      Environment:
+        Variables:
+          TABLE_NAME:
+            Ref: TasksTable
+          QUEUE_URL:
+            Ref: TaskExpiryQueue
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: TasksTable
+      - SQSSendMessagePolicy:
+          QueueName:
+            Fn::GetAtt:
+            - TaskExpiryQueue
+            - QueueName
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /tasks/{taskId}
+            Method: put
+            RestApiId:
+              Ref: ApiGateway
+    Metadata:
+      SamResourceId: UpdateTaskFunction
+  DeleteTaskFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-DeleteTask
+      Handler: com.todo.functions.handlers.DeleteTaskHandler::handleRequest
+      CodeUri: DeleteTaskFunction
+      Environment:
+        Variables:
+          TABLE_NAME:
+            Ref: TasksTable
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: TasksTable
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /tasks/{taskId}
+            Method: delete
+            RestApiId:
+              Ref: ApiGateway
+    Metadata:
+      SamResourceId: DeleteTaskFunction
+  StreamProcessorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-StreamProcessor
+      Handler: com.todo.functions.handlers.StreamProcessorHandler::handleRequest
+      CodeUri: StreamProcessorFunction
+      Environment:
+        Variables:
+          QUEUE_URL:
+            Ref: TaskExpiryQueue
+      Policies:
+      - SQSSendMessagePolicy:
+          QueueName:
+            Fn::GetAtt:
+            - TaskExpiryQueue
+            - QueueName
+      - DynamoDBStreamReadPolicy:
+          TableName:
+            Ref: TasksTable
+          StreamName:
+            Fn::Select:
+            - 3
+            - Fn::Split:
+              - /
+              - Fn::GetAtt:
+                - TasksTable
+                - StreamArn
+      Events:
+        DynamoDBStream:
+          Type: DynamoDB
+          Properties:
+            Stream:
+              Fn::GetAtt:
+              - TasksTable
+              - StreamArn
+            StartingPosition: LATEST
+            BatchSize: 10
+    Metadata:
+      SamResourceId: StreamProcessorFunction
+  TaskExpiryHandler:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-TaskExpiryHandler
+      Handler: com.todo.functions.expiry.TaskExpiryHandler::handleRequest
+      CodeUri: TaskExpiryHandler
+      Environment:
+        Variables:
+          TABLE_NAME:
+            Ref: TasksTable
+          TOPIC_ARN:
+            Ref: TaskNotificationTopic
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: TasksTable
+      - SNSPublishMessagePolicy:
+          TopicName:
+            Ref: TaskNotificationTopic
+      Events:
+        TaskExpirySQSEvent:
+          Type: SQS
+          Properties:
+            Queue:
+              Fn::GetAtt:
+              - TaskExpiryQueue
+              - Arn
+            BatchSize: 1
+    Metadata:
+      SamResourceId: TaskExpiryHandler
+  PostAuthLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-PostAuth
+      Handler: com.todo.functions.auth.PostAuthHandler::handleRequest
+      CodeUri: PostAuthLambda
+      Environment:
+        Variables:
+          TOPIC_ARN:
+            Ref: TaskNotificationTopic
+      Policies:
+      - Statement:
+          Effect: Allow
+          Action: sns:Publish
+          Resource:
+            Ref: TaskNotificationTopic
+    Metadata:
+      SamResourceId: PostAuthLambda
+  PostAuthLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Ref: PostAuthLambda
+      Principal: cognito-idp.amazonaws.com
+      SourceArn:
+        Fn::GetAtt:
+        - UserPool
+        - Arn
+Outputs:
+  ApiUrl:
+    Description: API Gateway endpoint URL
+    Value:
+      Fn::Sub: https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/${StageName}
+  UserPoolId:
+    Value:
+      Ref: UserPool
+  UserPoolClientId:
+    Value:
+      Ref: UserPoolClient
+  TaskTableName:
+    Value:
+      Ref: TasksTable
+  SnsTopicArn:
+    Value:
+      Ref: TaskNotificationTopic
+  ExpiryQueueUrl:
+    Value:
+      Ref: TaskExpiryQueue

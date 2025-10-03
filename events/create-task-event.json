@@ -1,0 +1,18 @@
+{
+  "body": "{\"description\": \"Test task from local invocation\", \"date\": \"2024-01-15\"}",
+  "httpMethod": "POST",
+  "path": "/tasks",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer eyJraWQiOiJLTzRVMWZs"
+  },
+  "requestContext": {
+    "authorizer": {
+      "claims": {
+        "sub": "test-user-123",
+        "email": "test@example.com",
+        "cognito:username": "test-user"
+      }
+    }
+  }
+}
