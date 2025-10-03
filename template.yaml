@@ -117,6 +117,9 @@ Resources:
         Authorizers:
           CognitoAuthorizer:
             UserPoolArn: !GetAtt UserPool.Arn
+            Identity:
+              Header: Authorization
+        AddDefaultAuthorizerToCorsPreflight: false
 
   ###########################################################
   # Lambda Functions - FIXED HANDLER PATHS

@@ -107,6 +107,9 @@ Resources:
               Fn::GetAtt:
               - UserPool
               - Arn
+            Identity:
+              Header: Authorization
+        AddDefaultAuthorizerToCorsPreflight: false
   CreateTaskFunction:
     Type: AWS::Serverless::Function
     Properties:
