@@ -5,9 +5,9 @@ codeuri = "C:\\Users\\AnyRicmo\\Desktop\\aws\\laps\\week-6\\todo-backend-sam\\He
 runtime = "java17"
 architecture = "x86_64"
 handler = "com.todo.functions.handlers.CreateTaskHandler::handleRequest"
-source_hash = "5be97c54376830cdf3fc18f6de76628156e1d4a74379da10af11aed03b81e943"
+source_hash = "daac5012381e174c0ba2d16402d6e42088500de4fb632cc5a5b83112e505b59a"
 manifest_hash = ""
 packagetype = "Zip"
-functions = ["CreateTaskFunction", "GetTasksFunction", "UpdateTaskFunction", "DeleteTaskFunction", "StreamProcessorFunction", "TaskExpiryHandler", "PostAuthLambda"]
+functions = ["CreateTaskFunction", "GetTaskByIdFunction", "GetTasksFunction", "UpdateTaskFunction", "DeleteTaskFunction", "StreamProcessorFunction", "TaskExpiryHandler", "PostAuthLambda"]
 
 [layer_build_definitions]

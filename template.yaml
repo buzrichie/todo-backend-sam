@@ -110,7 +110,7 @@ Resources:
       StageName: !Ref StageName
       Cors:
         AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
-        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Amz-User-Agent,X-Requested-With'"
         AllowOrigin: "'*'"
       Auth:
         DefaultAuthorizer: CognitoAuthorizer
@@ -145,24 +145,45 @@ Resources:
             Method: post
             RestApiId: !Ref ApiGateway
 
+  GetTaskByIdFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-GetTaskById
+      Handler: com.todo.functions.handlers.GetTaskByIdHandler::handleRequest
+      CodeUri: HelloWorldFunction/
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref TasksTable
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref TasksTable
+      Events:
+        GetTaskByIdApi:
+          Type: Api
+          Properties:
+            Path: /tasks/{taskId}
+            Method: get
+            RestApiId: !Ref ApiGateway
+
   GetTasksFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub ${AWS::StackName}-GetTasks
-      Handler: com.todo.functions.tasks.GetTasksHandler::handleRequest
-      Runtime: java17
+      Handler: com.todo.functions.handlers.GetTasksHandler::handleRequest
       CodeUri: HelloWorldFunction/
       Environment:
         Variables:
-          TABLE_NAME: !Ref TasksTable   # DynamoDB table name
+          TABLE_NAME: !Ref TasksTable
       Policies:
-        - Statement:
-            Effect: Allow
-            Action:
-              - dynamodb:GetItem
-              - dynamodb:Query
-              - dynamodb:Scan
-            Resource: !GetAtt TasksTable.Arn
+        - DynamoDBReadPolicy:
+            TableName: !Ref TasksTable
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /tasks
+            Method: get
+            RestApiId: !Ref ApiGateway
 
 
   UpdateTaskFunction:

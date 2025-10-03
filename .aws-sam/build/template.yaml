@@ -97,8 +97,10 @@ Resources:
         Ref: StageName
       Cors:
         AllowMethods: '''GET,POST,PUT,DELETE,OPTIONS'''
-        AllowHeaders: '''Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'''
-        AllowOrigin: '''*'''
+        AllowHeaders: '''Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Amz-User-Agent,X-Requested-With'''
+        AllowOrigin: '''http://localhost:4200'''
+        AllowCredentials: true
+        MaxAge: '''600'''
       Auth:
         DefaultAuthorizer: CognitoAuthorizer
         Authorizers:
@@ -139,29 +141,54 @@ Resources:
               Ref: ApiGateway
     Metadata:
       SamResourceId: CreateTaskFunction
+  GetTaskByIdFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-GetTaskById
+      Handler: com.todo.functions.handlers.GetTaskByIdHandler::handleRequest
+      CodeUri: GetTaskByIdFunction
+      Environment:
+        Variables:
+          TABLE_NAME:
+            Ref: TasksTable
+      Policies:
+      - DynamoDBReadPolicy:
+          TableName:
+            Ref: TasksTable
+      Events:
+        GetTaskByIdApi:
+          Type: Api
+          Properties:
+            Path: /tasks/{taskId}
+            Method: get
+            RestApiId:
+              Ref: ApiGateway
+    Metadata:
+      SamResourceId: GetTaskByIdFunction
   GetTasksFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName:
         Fn::Sub: ${AWS::StackName}-GetTasks
-      Handler: com.todo.functions.tasks.GetTasksHandler::handleRequest
-      Runtime: java17
+      Handler: com.todo.functions.handlers.GetTasksHandler::handleRequest
       CodeUri: GetTasksFunction
       Environment:
         Variables:
           TABLE_NAME:
             Ref: TasksTable
       Policies:
-      - Statement:
-          Effect: Allow
-          Action:
-          - dynamodb:GetItem
-          - dynamodb:Query
-          - dynamodb:Scan
-          Resource:
-            Fn::GetAtt:
-            - TasksTable
-            - Arn
+      - DynamoDBReadPolicy:
+          TableName:
+            Ref: TasksTable
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /tasks
+            Method: get
+            RestApiId:
+              Ref: ApiGateway
     Metadata:
       SamResourceId: GetTasksFunction
   UpdateTaskFunction:
